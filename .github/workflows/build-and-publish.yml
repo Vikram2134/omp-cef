@@ -1,23 +1,16 @@
-name: Build & Publish
+name: XEO v1.3.0 Cef 6675 Build
 
 on:
   push:
-    tags: ['v*']
-  pull_request:
-    branches: ['**']
+    branches: ['xeo-v1.3.0-6675']
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
-    name: Build cef.so (linux x64, vcpkg)
+    name: Build v1.3.0 Cef.so (Linux x64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +20,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ pkg-config curl zip unzip tar
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ pkg-config curl zip unzip tar jq
 
       - name: Bootstrap vcpkg
         run: |
@@ -46,11 +38,11 @@ jobs:
           path: |
             ${{ github.workspace }}/vcpkg/installed
             ~/.cache/vcpkg/archives
-          key:  vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-v130-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-
+            vcpkg-v130-${{ runner.os }}-
 
-      - name: Configure
+      - name: Configure v1.3.0 server component
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -62,47 +54,16 @@ jobs:
       - name: Build
         run: cmake --build build --config RelWithDebInfo
 
-      - name: Stage artifact
+      - name: Stage Cef.so
         run: |
           mkdir -p artifact-stage
-          # Component output location varies — search the build tree for any .so under server/.
           find build -path '*/server/*' -name '*.so' -exec cp {} artifact-stage/ \;
-          ls -la artifact-stage/
-          test -n "$(ls -A artifact-stage/)" || (echo "::error::no .so produced under build/**/server/"; exit 1)
+          ls -lah artifact-stage/
+          test -n "$(find artifact-stage -maxdepth 1 -name '*.so' -print -quit)" || (echo "::error::No server .so produced"; exit 1)
 
-      - name: Generate artifact Dockerfile
-        run: |
-          cat > artifact-stage/Dockerfile <<'EOF'
-          FROM scratch
-          COPY *.so /
-          EOF
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Compute image tags
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Upload XEO v1.3.0 artifact
+        uses: actions/upload-artifact@v4
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Login to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push artifact image
-        uses: docker/build-push-action@v5
-        with:
-          context: artifact-stage
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          name: XEO-Cef-v1.3.0-port-6675
+          path: artifact-stage/*.so
+          if-no-files-found: error
